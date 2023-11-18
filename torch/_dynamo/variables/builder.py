@@ -1571,7 +1571,9 @@ def _automatic_dynamic(e, tx, name, static_shapes) -> CreateSymbolicPolicy:
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    if any(isinstance(s, SymInt) for s in e.size()):
+    from torch._prims_common import _is_singleton
+
+    if any(isinstance(s, SymInt) and not _is_singleton(s) for s in e.size()):
         return FreshCreateSymbolicPolicy(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
@@ -1726,8 +1728,9 @@ def wrap_to_fake_tensor_and_record(e, tx, *, source: Optional[Source], is_tensor
         )
 
         policy = None
-        if not e.is_nested:
-            # TODO: We should probably support this for nested tensors too
+        is_strided_nt = e.is_nested and e.layout == torch.strided
+        if not is_strided_nt:
+            # TODO: Support this for strided nested tensors
             policy = _automatic_dynamic(e, tx, source.name(), static_shapes)
 
         log.debug(
