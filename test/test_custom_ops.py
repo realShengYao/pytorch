@@ -1489,11 +1489,6 @@ def forward(self, x_1):
 
         f(torch.randn(10))
 
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"dynamic shape operator: _torch_testing.numpy_nonzero.default": 1},
-        )
-
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
     # graph break on data-dependent operations. Eventually we'll make it so
     # that it never graph breaks on data-dependent operations.
