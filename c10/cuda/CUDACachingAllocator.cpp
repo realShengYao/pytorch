@@ -20,6 +20,10 @@
 #include <regex>
 #include <set>
 #include <vector>
+#include <thread>
+#include <iostream>
+#include <map>
+#include <utility>
 
 namespace c10 {
 
@@ -485,6 +489,9 @@ class DeviceCachingAllocator {
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
         small_blocks(BlockComparator, /*is_small=*/true) {
+    printf("Constructing DeviceCachingAllocator!");   
+    std::thread::id this_id = std::this_thread::get_id();
+    std::cout<<"Thread ID: " << this_id << std::endl;   
     stats.max_split_size = CachingAllocatorConfig::max_split_size();
   }
 
@@ -1515,6 +1522,12 @@ class THCCachingAllocator {
   }
 
  public:
+  THCCachingAllocator& operator=(const THCCachingAllocator &t) {
+    if (this != &t) {
+    }
+    return *this;
+  }
+
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
   std::mutex* getCudaFreeMutex() const {
@@ -1631,7 +1644,7 @@ class THCCachingAllocator {
   }
 };
 
-THCCachingAllocator caching_allocator;
+std::map<std::thread::id, THCCachingAllocator> caching_allocator{};
 
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
@@ -1666,7 +1679,7 @@ struct CudaCachingAllocator : public Allocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
-      caching_allocator.malloc(
+      caching_allocator.find(std::this_thread::get_id())->second.malloc(
           &r, device, size, cuda::getCurrentCUDAStream(device));
     }
     return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
@@ -1687,36 +1700,43 @@ Allocator* get(void) {
 }
 
 void init(int device_count) {
-  caching_allocator.init(device_count);
+  auto it = caching_allocator.find(std::this_thread::get_id());
+  if (it == caching_allocator.end()){
+    THCCachingAllocator thcCachingAllocator;
+    caching_allocator[std::this_thread::get_id()] = std::move(thcCachingAllocator);
+  }
+  caching_allocator.find(std::this_thread::get_id())->second.init(device_count);
+  std::cout << "Who called me?" << std::endl;
+  // caching_allocator.init(device_count);
 }
 
 void setMemoryFraction(double fraction, int device) {
-  caching_allocator.setMemoryFraction(fraction, device);
+  caching_allocator.find(std::this_thread::get_id())->second.setMemoryFraction(fraction, device);
 }
 
 void emptyCache(void) {
-  caching_allocator.emptyCache();
+  caching_allocator.find(std::this_thread::get_id())->second.emptyCache();
 }
 
 void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
-  caching_allocator.device_allocator[dev_id]->cacheInfo(
+  caching_allocator.find(std::this_thread::get_id())->second.device_allocator[dev_id]->cacheInfo(
       cachedAndFree, largestBlock);
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {
-  return caching_allocator.getBaseAllocation(ptr, size);
+  return caching_allocator.find(std::this_thread::get_id())->second.getBaseAllocation(ptr, size);
 }
 
 void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
-  caching_allocator.recordStream(ptr, stream);
+  caching_allocator.find(std::this_thread::get_id())->second.recordStream(ptr, stream);
 }
 
 std::mutex* getFreeMutex() {
-  return caching_allocator.getCudaFreeMutex();
+  return caching_allocator.find(std::this_thread::get_id())->second.getCudaFreeMutex();
 }
 
 static inline void assertValidDevice(int device) {
-  const auto device_num = caching_allocator.device_allocator.size();
+  const auto device_num = caching_allocator.find(std::this_thread::get_id())->second.device_allocator.size();
   TORCH_CHECK(
       0 <= device && device < static_cast<int64_t>(device_num),
       "Invalid device argument ",
@@ -1726,21 +1746,21 @@ static inline void assertValidDevice(int device) {
 
 DeviceStats getDeviceStats(int device) {
   assertValidDevice(device);
-  return caching_allocator.device_allocator[device]->getStats();
+  return caching_allocator.find(std::this_thread::get_id())->second.device_allocator[device]->getStats();
 }
 
 void resetAccumulatedStats(int device) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->resetAccumulatedStats();
+  caching_allocator.find(std::this_thread::get_id())->second.device_allocator[device]->resetAccumulatedStats();
 }
 
 void resetPeakStats(int device) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->resetPeakStats();
+  caching_allocator.find(std::this_thread::get_id())->second.device_allocator[device]->resetPeakStats();
 }
 
 std::vector<SegmentInfo> snapshot() {
-  return caching_allocator.snapshot();
+  return caching_allocator.find(std::this_thread::get_id())->second.snapshot();
 }
 
 // CUDAGraph interactions
@@ -1749,18 +1769,18 @@ void notifyCaptureBegin(
     CaptureId_t graph_id,
     MempoolId_t mempool_id) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureBegin(
+  caching_allocator.find(std::this_thread::get_id())->second.device_allocator[device]->notifyCaptureBegin(
       graph_id, mempool_id);
 }
 
 void notifyCaptureEnd(int device, CaptureId_t graph_id) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureEnd(graph_id);
+  caching_allocator.find(std::this_thread::get_id())->second.device_allocator[device]->notifyCaptureEnd(graph_id);
 }
 
 void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureDestroy(mempool_id);
+  caching_allocator.find(std::this_thread::get_id())->second.device_allocator[device]->notifyCaptureDestroy(mempool_id);
 }
 
 //
@@ -1825,7 +1845,7 @@ void* raw_alloc(size_t nbytes) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  caching_allocator.malloc(
+  caching_allocator.find(std::this_thread::get_id())->second.malloc(
       &r, device, nbytes, cuda::getCurrentCUDAStream(device));
   return r;
 }
@@ -1837,12 +1857,12 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   void* r = nullptr;
-  caching_allocator.malloc(&r, device, nbytes, stream);
+  caching_allocator.find(std::this_thread::get_id())->second.malloc(&r, device, nbytes, stream);
   return r;
 }
 
 void raw_delete(void* ptr) {
-  caching_allocator.free(ptr);
+  caching_allocator.find(std::this_thread::get_id())->second.free(ptr);
 }
 
 } // namespace CUDACachingAllocator
