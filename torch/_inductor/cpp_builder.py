@@ -1729,25 +1729,28 @@ class CppBuilder:
         """
 
         definitions = " ".join(self._build_option.get_definitions())
+        target_name = config.aot_inductor.model_name_for_generated_files or "aoti_model"
+        target_library_type = "STATIC" if config.aot_inductor.compile_standalone else "SHARED"
+
         contents = textwrap.dedent(
             f"""
             cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
+            project({target_name} LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
             # May need to point CMAKE_PREFIX_PATH to the right torch location
             find_package(Torch REQUIRED)
 
             # Set a shared library target
-            add_library(aoti_model SHARED)
+            add_library({target_name} {target_library_type})
 
             # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
+            target_compile_definitions({target_name} PRIVATE {definitions})
 
             # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
+            target_compile_options({target_name} PRIVATE {self._cflags_args})
             # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
+            target_compile_options({target_name} PRIVATE {self._passthrough_parameters_args} -c)
 
             """
         )

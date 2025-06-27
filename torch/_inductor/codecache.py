@@ -74,6 +74,7 @@ from torch._inductor.cpp_builder import (
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
+    get_aoti_model_header,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
@@ -1752,6 +1753,23 @@ class AotCodeCompiler:
             key=config.aot_inductor.model_name_for_generated_files,
         )
 
+        header_code = ""
+        header_path = ""
+        if config.aot_inductor.compile_standalone:
+            # to link statically, we also need a header file
+            with open(
+                os.path.join(os.path.dirname(__file__), "codegen", "aoti_runtime", "model.h")
+            ) as f:
+                class_name = f"AOTInductorModel{wrapper_key}"
+                header_code = f.read()
+                header_code.replace("AOTInductorModelClassNamePlaceholder", class_name)
+                _, header_path = write(
+                    header_code,
+                    ".h",
+                    specified_dir=specified_output_path,
+                    key="model",
+                )
+
         # Log the AOTInductor wrapper and kernel code, if needed.
         with tempfile.NamedTemporaryFile("w+") as t:
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
@@ -1762,6 +1780,8 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
+            if config.aot_inductor.compile_standalone:
+                generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
         output_code_log.info("Kernel code written to: %s", kernel_path)
@@ -1783,6 +1803,17 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
+        if config.aot_inductor.compile_standalone:
+            output_code_log.info("Header code written to: %s", header_path)
+            trace_structured(
+                "graph_dump",
+                lambda: {
+                    "name": "inductor_aot_header_code",
+                    "type": "cpp",
+                    "filename": header_path,
+                },
+                payload_fn=lambda: header_code,
+            )
 
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected

@@ -208,10 +208,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
+            if config.aot_inductor.compile_standalone:
+                with open(
+                    os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
+                ) as f:
+                    self.header.splice(f.read())
+            else:
+                self.header.splice("""#include \"model1.h\"""")
             self.header.splice("\n")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
