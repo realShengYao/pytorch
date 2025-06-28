@@ -1409,9 +1409,11 @@ class aot_inductor:
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
     
+    # TODO:
     # Governs other configs if not set explicitly:
     # emit_multi_arch_kernel: True
     # package_cpp_only: True
+    # must use with package_cpp_only: True
     compile_standalone: bool = False
 
 
@@ -1777,8 +1779,3 @@ if TYPE_CHECKING:
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
-
-
-if aot_inductor.compile_standalone:
-    aot_inductor.package_cpp_only = True
-    aot_inductor.emit_multi_arch_kernel = True

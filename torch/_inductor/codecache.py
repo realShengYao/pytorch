@@ -74,7 +74,6 @@ from torch._inductor.cpp_builder import (
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
-    get_aoti_model_header,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import (
@@ -1733,7 +1732,12 @@ class AotCodeCompiler:
         if config.aot_inductor.package_cpp_only:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
-
+        
+        from .utils import aoti_model_name_from_config
+        model_class_name = ""
+        if config.aot_inductor.compile_standalone:
+            model_class_name = aoti_model_name_from_config()
+        
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1760,12 +1764,12 @@ class AotCodeCompiler:
             with open(
                 os.path.join(os.path.dirname(__file__), "codegen", "aoti_runtime", "model.h")
             ) as f:
-                class_name = f"AOTInductorModel{wrapper_key}"
+                class_name = f"AOTInductorModel{model_class_name}"
                 header_code = f.read()
-                header_code.replace("AOTInductorModelClassNamePlaceholder", class_name)
+                header_code = header_code.replace("AOTInductorModelClassNamePlaceholder", class_name)
                 _, header_path = write(
                     header_code,
-                    ".h",
+                    "h",
                     specified_dir=specified_output_path,
                     key="model",
                 )
