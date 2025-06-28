@@ -88,18 +88,41 @@ def parallelize_module(  # type: ignore[return]
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
+            if module_path == "":
+                # shortcut: apply the plan to the current module
+                parallelize_module(module, device_mesh, parallelize_style)
+                continue
+
             path_splits = module_path.split(".")
             if len(path_splits) == 0:
                 raise ValueError(
                     "Expect module path to be non-empty, but got empty string!"
                 )
+            # Instead of blindly popping tokens, first check the match.
+            # We'll use a while loop that only consumes tokens if a match is found.
+            current_module = module  # start at the current module level
+            # We use an inner loop with the remaining tokens.
             while path_splits:
-                atom = path_splits.pop(0)
-                matched_children = filter(
-                    # `t[0]` is child name
-                    lambda t: fnmatch(t[0], atom),
-                    module.named_children(),
+                # Look ahead at the next token without consuming it.
+                token = path_splits[0]
+                matched_children = list(
+                    filter(
+                        # `t[0]` is child name
+                        lambda t: fnmatch(t[0], token),
+                        current_module.named_children(),
+                    )
                 )
+                if not matched_children:
+                    # No match at this level. Log a warning and break out so that this plan entry becomes a no-op.
+                    warnings.warn(
+                        f"Parallelize plan key '{module_path}' could not be resolved: "
+                        f"no submodule matching token '{token}' in module {current_module}, "
+                        f"skipping this plan entry."
+                    )
+                    break
+
+                # Now that we have a match, we can consume the token.
+                path_splits.pop(0)
                 # apply the plan to all matched submodules
                 for _, submodule in matched_children:
                     if path_splits:
